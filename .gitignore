@@ -1,0 +1,4 @@
+/.env
+/spypoint
+/.venv/*
+/.idea/*
