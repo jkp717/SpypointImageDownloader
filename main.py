@@ -1,12 +1,13 @@
 import spypoint
-
 import requests
 import datetime
 import os
 from urllib.parse import urlparse
-
+import logging
+from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
 
 def download_new_images(url, save_path):
     try:
@@ -25,7 +26,7 @@ def download_new_images(url, save_path):
 
         # only download new images
         if os.path.exists(full_path):
-            print(f"Skipping duplicate image: {full_path}")
+            logger.warning(f"Skipping duplicate image: {full_path}")
             return
 
         # Open the file in binary write mode and write the content
@@ -33,41 +34,42 @@ def download_new_images(url, save_path):
             for chunk in response.iter_content(chunk_size=8192):
                 file.write(chunk)
 
-        print(f"Image successfully downloaded and saved to: {full_path}")
+        logger.info(f"Image successfully downloaded and saved to: {full_path}")
 
     except requests.exceptions.RequestException as e:
-        print(f"Error downloading the image: {e}")
+        logger.error(f"Error downloading the image: {e}")
+        exit(1)
     except IOError as e:
-        print(f"Error saving the image: {e}")
-    except Exception as ex:
-        print(ex)
+        logger.error(f"Error saving the image: {e}")
+        exit(1)
 
 
-def get_photo_urls_by_camera(sp_client, iso_datetime):
+def get_photo_urls_by_camera(sp_client):
     res = {}
     cameras = sp_client.cameras()
     for cam in cameras:
-        res[cam.config.name] = [p.url() for p in sp_client.photos([cam], limit=10000, date_end=iso_datetime)]
+        res[cam.config.name] = [p.url() for p in sp_client.photos([cam], limit=10000)]
     return res
 
 
 if __name__ == "__main__":
 
+    logger.setLevel(logging.INFO)
+
+    # Rotate logs when file reaches 1MB, keep 5 backups
+    handler = RotatingFileHandler('spypoint.log', maxBytes=1024 * 1024, backupCount=2)
+    logger.addHandler(handler)
+
     load_dotenv(dotenv_path='.env')
     c = spypoint.Client(os.getenv('SPYPOINT_USERNAME'), os.getenv('SPYPOINT_PASSWORD'))
 
-    today_utc = datetime.datetime.now(datetime.timezone.utc).date()
-    yesterday_utc = today_utc - datetime.timedelta(days=1)
-    midnight_utc = datetime.datetime(yesterday_utc.year, yesterday_utc.month, yesterday_utc.day, tzinfo=datetime.timezone.utc)
-    formatted_dt = midnight_utc.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
-
-    photo_urls = get_photo_urls_by_camera(c, iso_datetime=formatted_dt)
+    photo_urls = get_photo_urls_by_camera(c)
 
     for cam, urls in photo_urls.items():
         cam_dir = os.path.join(os.getenv('SPYPOINT_DOWNLOAD_PATH'), cam)
         if not os.path.exists(cam_dir):
             os.makedirs(cam_dir)
-            print(f"Created directory: {cam_dir}")
+            logger.info(f"Created directory: {cam_dir}")
 
         for url in urls:
             download_new_images(url, cam_dir)
